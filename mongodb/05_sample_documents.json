@@ -1,0 +1,241 @@
+[
+  {
+    "_comment": "=================================================================",
+    "_title":   "WAL Log Document Reference — All Possible Fields",
+    "_project": "ADBMS Final Project: Log-Based Recovery System",
+    "_purpose": "This JSON file documents the complete structure of wal_logs documents."
+  },
+
+  {
+    "_section": "GROUP 1 — COMMITTED Transactions (Normal Flow)",
+    "_description": "WAL written BEFORE PostgreSQL update. After PG update succeeds, status → COMMITTED."
+  },
+
+  {
+    "log_id":           1,
+    "transaction_id":   101,
+    "session_id":       "sess_20260517_001",
+    "operation":        "UPDATE",
+    "table_name":       "Account",
+    "account_id":       1,
+    "transaction_type": "DEPOSIT",
+    "old_balance":      8000.00,
+    "new_balance":      10000.00,
+    "amount":           2000.00,
+    "status":           "COMMITTED",
+    "timestamp":        "2026-05-17T08:00:00Z",
+    "notes":            "Deposit by Ali Raza — COMMITTED successfully"
+  },
+
+  {
+    "log_id":           2,
+    "transaction_id":   102,
+    "session_id":       "sess_20260517_001",
+    "operation":        "UPDATE",
+    "table_name":       "Account",
+    "account_id":       3,
+    "transaction_type": "WITHDRAWAL",
+    "old_balance":      25000.00,
+    "new_balance":      22000.00,
+    "amount":           3000.00,
+    "status":           "COMMITTED",
+    "timestamp":        "2026-05-17T08:15:00Z",
+    "notes":            "Withdrawal by Sara Khan — COMMITTED successfully"
+  },
+
+  {
+    "log_id":           3,
+    "transaction_id":   103,
+    "session_id":       "sess_20260517_002",
+    "operation":        "UPDATE",
+    "table_name":       "Account",
+    "account_id":       1,
+    "transaction_type": "TRANSFER_OUT",
+    "old_balance":      10000.00,
+    "new_balance":       8500.00,
+    "amount":            1500.00,
+    "status":           "COMMITTED",
+    "timestamp":        "2026-05-17T08:30:00Z",
+    "notes":            "Transfer OUT: ACC-00001 → ACC-00007 — COMMITTED"
+  },
+
+  {
+    "log_id":           4,
+    "transaction_id":   104,
+    "session_id":       "sess_20260517_002",
+    "operation":        "UPDATE",
+    "table_name":       "Account",
+    "account_id":       7,
+    "transaction_type": "TRANSFER_IN",
+    "old_balance":       2000.00,
+    "new_balance":       3500.00,
+    "amount":            1500.00,
+    "status":           "COMMITTED",
+    "timestamp":        "2026-05-17T08:30:05Z",
+    "notes":            "Transfer IN: ACC-00007 ← ACC-00001 — COMMITTED"
+  },
+
+  {
+    "_section": "GROUP 2 — ROLLED_BACK Transactions",
+    "_description": "WAL written, PG update started or blocked, ROLLBACK called. old_balance preserved."
+  },
+
+  {
+    "log_id":           6,
+    "transaction_id":   106,
+    "session_id":       "sess_20260517_004",
+    "operation":        "UPDATE",
+    "table_name":       "Account",
+    "account_id":       4,
+    "transaction_type": "WITHDRAWAL",
+    "old_balance":      15000.00,
+    "new_balance":          0.00,
+    "amount":           20000.00,
+    "status":           "ROLLED_BACK",
+    "timestamp":        "2026-05-17T09:20:00Z",
+    "notes":            "ROLLED_BACK — Insufficient funds. PG balance constraint blocked update."
+  },
+
+  {
+    "log_id":           7,
+    "transaction_id":   107,
+    "session_id":       "sess_20260517_005",
+    "operation":        "UPDATE",
+    "table_name":       "Account",
+    "account_id":       5,
+    "transaction_type": "DEPOSIT",
+    "old_balance":       8000.00,
+    "new_balance":      13000.00,
+    "amount":            5000.00,
+    "status":           "ROLLED_BACK",
+    "timestamp":        "2026-05-17T09:35:00Z",
+    "notes":            "ROLLED_BACK — Operator cancelled deposit manually"
+  },
+
+  {
+    "_section": "GROUP 3 — UNCOMMITTED (Crash State)",
+    "_description": "WAL written, PG update may be partially applied. COMMIT never reached. Recovery Manager must UNDO these."
+  },
+
+  {
+    "log_id":           8,
+    "transaction_id":   108,
+    "session_id":       "sess_20260517_006",
+    "operation":        "UPDATE",
+    "table_name":       "Account",
+    "account_id":       1,
+    "transaction_type": "WITHDRAWAL",
+    "old_balance":      10000.00,
+    "new_balance":       7000.00,
+    "amount":            3000.00,
+    "status":           "UNCOMMITTED",
+    "timestamp":        "2026-05-17T10:00:00Z",
+    "notes":            "CRASH: System failed mid-transaction. UNDO required: restore to 10000.00"
+  },
+
+  {
+    "log_id":           9,
+    "transaction_id":   109,
+    "session_id":       "sess_20260517_006",
+    "operation":        "UPDATE",
+    "table_name":       "Account",
+    "account_id":       3,
+    "transaction_type": "DEPOSIT",
+    "old_balance":      22000.00,
+    "new_balance":      24500.00,
+    "amount":            2500.00,
+    "status":           "UNCOMMITTED",
+    "timestamp":        "2026-05-17T10:00:05Z",
+    "notes":            "CRASH: Deposit never committed. UNDO required: restore to 22000.00"
+  },
+
+  {
+    "log_id":           10,
+    "transaction_id":   110,
+    "session_id":       "sess_20260517_006",
+    "operation":        "UPDATE",
+    "table_name":       "Account",
+    "account_id":       7,
+    "transaction_type": "TRANSFER_OUT",
+    "old_balance":       3500.00,
+    "new_balance":       1000.00,
+    "amount":            2500.00,
+    "status":           "UNCOMMITTED",
+    "timestamp":        "2026-05-17T10:00:10Z",
+    "notes":            "CRASH: Partial transfer. UNDO required: restore to 3500.00"
+  },
+
+  {
+    "_section": "RECOVERY LOGS — Written by Recovery Manager after UNDO/REDO"
+  },
+
+  {
+    "_collection": "recovery_logs",
+    "recovery_id":             1,
+    "recovery_type":           "UNDO",
+    "transaction_id":          108,
+    "account_id":              1,
+    "balance_before_recovery": 7000.00,
+    "balance_after_recovery":  10000.00,
+    "reason":                  "CRASH_DETECTED",
+    "recovered_at":            "2026-05-17T10:00:50Z",
+    "recovery_session":        "recovery_20260517_001",
+    "notes":                   "UNDO applied: account_id=1 restored from 7000 → 10000"
+  },
+
+  {
+    "_collection": "recovery_logs",
+    "recovery_id":             2,
+    "recovery_type":           "UNDO",
+    "transaction_id":          109,
+    "account_id":              3,
+    "balance_before_recovery": 24500.00,
+    "balance_after_recovery":  22000.00,
+    "reason":                  "CRASH_DETECTED",
+    "recovered_at":            "2026-05-17T10:00:55Z",
+    "recovery_session":        "recovery_20260517_001",
+    "notes":                   "UNDO applied: account_id=3 restored from 24500 → 22000"
+  },
+
+  {
+    "_collection": "recovery_logs",
+    "recovery_id":             3,
+    "recovery_type":           "UNDO",
+    "transaction_id":          110,
+    "account_id":              7,
+    "balance_before_recovery": 1000.00,
+    "balance_after_recovery":  3500.00,
+    "reason":                  "CRASH_DETECTED",
+    "recovered_at":            "2026-05-17T10:01:00Z",
+    "recovery_session":        "recovery_20260517_001",
+    "notes":                   "UNDO applied: account_id=7 restored from 1000 → 3500"
+  },
+
+  {
+    "_collection": "recovery_logs",
+    "recovery_id":             4,
+    "recovery_type":           "REDO",
+    "transaction_id":          105,
+    "account_id":              5,
+    "balance_before_recovery": 7000.00,
+    "balance_after_recovery":  8000.00,
+    "reason":                  "COMMIT_LOSS",
+    "recovered_at":            "2026-05-17T10:01:05Z",
+    "recovery_session":        "recovery_20260517_001",
+    "notes":                   "REDO applied: committed txn 105 re-applied — account_id=5 → 8000"
+  },
+
+  {
+    "_collection": "crash_log",
+    "crash_id":                    1,
+    "crash_detected_at":           "2026-05-17T10:00:30Z",
+    "crash_type":                  "UNEXPECTED_SHUTDOWN",
+    "uncommitted_transaction_ids": [108, 109, 110],
+    "committed_transaction_ids":   [101, 102, 103, 104, 105],
+    "rolled_back_transaction_ids": [106, 107],
+    "recovery_triggered":          true,
+    "recovery_started_at":         "2026-05-17T10:00:45Z",
+    "recovery_completed_at":       "2026-05-17T10:01:05Z",
+    "recovery_summary":            "UNDO applied to 3 uncommitted transactions. REDO applied to 1 committed transaction. All accounts consistent."
+  }
+]
