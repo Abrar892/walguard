@@ -1,0 +1,120 @@
+% ============================================================
+% ch06_conclusion.tex
+% Conclusion, Future Enhancements, References
+% ============================================================
+
+\chapter{Conclusion}
+
+This project successfully implemented a simplified \textbf{Log-Based Recovery
+System} demonstrating core Advanced Database Management Systems concepts in a
+practical, observable manner. The following objectives were achieved:
+
+\begin{enumerate}
+  \item \textbf{Write-Ahead Logging} was implemented using MongoDB as the
+        WAL store. Every transaction writes a log entry before modifying
+        PostgreSQL, ensuring that no data change is unlogged.
+
+  \item \textbf{Transaction Management} was demonstrated through explicit
+        deposit, withdrawal, and transfer operations with manual
+        \texttt{COMMIT} and \texttt{ROLLBACK} control.
+
+  \item \textbf{Crash Simulation} provided a testable way to create
+        database inconsistency by injecting a failure between the WAL log
+        write and the PostgreSQL commit.
+
+  \item \textbf{UNDO Recovery} successfully identified UNCOMMITTED WAL
+        logs and restored old balances in PostgreSQL, confirming the
+        system's ability to reverse incomplete transactions.
+
+  \item \textbf{REDO Recovery} verified that committed transactions whose
+        PostgreSQL effects were lost could be re-applied from the WAL log.
+
+  \item \textbf{Polyglot Persistence} was demonstrated by the coordinated
+        use of PostgreSQL (relational, ACID) and MongoDB (document, flexible)
+        in a single application.
+\end{enumerate}
+
+The project shows that recovery concepts traditionally explained through
+complex theory can be made concrete and observable through a practical
+implementation. The system is suitable for viva presentation and provides
+a strong foundation for understanding how production databases handle
+crash recovery.
+
+\section{Future Enhancements}
+
+The following enhancements would make the system more complete:
+
+\begin{enumerate}
+  \item \textbf{Checkpoint Support}: Implement periodic checkpoints to
+        limit recovery scan range and improve performance for large log sets.
+
+  \item \textbf{Log Sequence Numbers (LSN)}: Add LSN ordering to WAL logs
+        for more precise undo/redo sequencing, moving closer to full ARIES.
+
+  \item \textbf{Concurrent Transactions}: Add locking mechanisms to support
+        multiple simultaneous users while maintaining data consistency.
+
+  \item \textbf{Web Dashboard}: Build a simple Flask or FastAPI web interface
+        to visualize WAL logs and recovery actions in a browser.
+
+  \item \textbf{Compression and Archiving}: Implement log rotation and
+        archiving for the MongoDB WAL collection to manage long-term storage.
+
+  \item \textbf{Transfer Recovery}: Extend recovery to handle partial
+        two-leg transfers where only one leg was applied before a crash.
+
+  \item \textbf{MongoDB Write Concern}: Enable \texttt{w: "majority"} write
+        concern to ensure WAL logs survive MongoDB node failures.
+\end{enumerate}
+
+% ────────────────────────────────────────────────────────────
+\begin{thebibliography}{9}
+
+\bibitem{ramakrishnan2002}
+  Ramakrishnan, R. and Gehrke, J. (2002).
+  \textit{Database Management Systems}, 3rd Edition.
+  McGraw-Hill Education.
+
+\bibitem{mohan1992}
+  Mohan, C., Haderle, D., Lindsay, B., Pirahesh, H., and Schwarz, P. (1992).
+  ARIES: A Transaction Recovery Method Supporting Fine-Granularity Locking
+  and Partial Rollbacks Using Write-Ahead Logging.
+  \textit{ACM Transactions on Database Systems}, 17(1), 94--162.
+
+\bibitem{gray1993}
+  Gray, J. and Reuter, A. (1993).
+  \textit{Transaction Processing: Concepts and Techniques}.
+  Morgan Kaufmann Publishers.
+
+\bibitem{fowler2012}
+  Fowler, M. and Sadalage, P.J. (2012).
+  \textit{NoSQL Distilled: A Brief Guide to the Emerging World of
+  Polyglot Persistence}.
+  Addison-Wesley Professional.
+
+\bibitem{postgresql2024}
+  PostgreSQL Global Development Group. (2024).
+  \textit{PostgreSQL 16 Documentation}.
+  \url{https://www.postgresql.org/docs/16/}
+
+\bibitem{mongodb2024}
+  MongoDB, Inc. (2024).
+  \textit{MongoDB Manual}.
+  \url{https://www.mongodb.com/docs/manual/}
+
+\bibitem{silberschatz2020}
+  Silberschatz, A., Korth, H.F., and Sudarshan, S. (2020).
+  \textit{Database System Concepts}, 7th Edition.
+  McGraw-Hill Education.
+
+\bibitem{psycopg2}
+  Di Gregorio, F. (2024).
+  \textit{Psycopg 2.9 Documentation}.
+  \url{https://www.psycopg.org/docs/}
+
+\bibitem{pymongo}
+  MongoDB, Inc. (2024).
+  \textit{PyMongo 4.6 Documentation}.
+  \url{https://pymongo.readthedocs.io/}
+
+\end{thebibliography}

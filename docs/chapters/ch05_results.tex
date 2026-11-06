@@ -1,0 +1,283 @@
+% ============================================================
+% ch05_results.tex
+% Demo Flow, Advantages, Limitations, Viva Preparation
+% ============================================================
+
+\chapter{Demonstration Flow}
+
+\section{Recommended Viva Demo Sequence}
+
+The following sequence demonstrates all ADBMS concepts within 10--15 minutes:
+
+\begin{table}[H]
+\centering
+\caption{Demo Sequence for Viva}
+\begin{tabularx}{\textwidth}{clX}
+\toprule
+\textbf{Step} & \textbf{Menu Option} & \textbf{Concept Shown} \\
+\midrule
+1 & 7 (Show Balances) & Starting PostgreSQL state \\
+2 & 6 (Show WAL Logs) & Empty or existing MongoDB logs \\
+3 & 1 (Deposit) & WAL written → PG updated → COMMITTED \\
+4 & 6 (Show WAL Logs) & See the COMMITTED entry \\
+5 & 2 (Withdraw, large amount) & Insufficient funds → ROLLBACK → ROLLED\_BACK \\
+6 & 4 (Simulate Crash) & UNCOMMITTED log created in MongoDB \\
+7 & 6 (Show WAL Logs) & Point to the UNCOMMITTED entry \\
+8 & 7 (Show Balances) & Verify PG balance unchanged (auto-rollback) \\
+9 & 5 (Run Recovery) & Analysis → UNDO → REDO phases \\
+10 & 6 (Show WAL Logs) & Entry now ROLLED\_BACK \\
+11 & 7 (Show Balances) & Consistent state confirmed \\
+\bottomrule
+\end{tabularx}
+\end{table}
+
+\section{Sample Terminal Output}
+
+\subsection{Normal Deposit (Option 1)}
+
+\begin{lstlisting}[style=jsonstyle, caption={Deposit terminal output}]
+  [Session] sess_a1b2c3
+
+  ====================================================
+  DEPOSIT | ACC-00001 | +1500.00
+  ====================================================
+  Old balance: 10000.00
+    [WAL] Log #1 -> UNCOMMITTED  (DEPOSIT, account=1, 10000.00->11500.00)
+    [PG]  COMMIT -- Transaction_Record id=13
+    [WAL] Log #1 -> COMMITTED
+  New balance: 11500.00
+  v Deposit successful.
+\end{lstlisting}
+
+\subsection{Rollback --- Insufficient Funds (Option 2)}
+
+\begin{lstlisting}[style=jsonstyle, caption={Rollback terminal output}]
+  ====================================================
+  WITHDRAWAL | ACC-00005 | -50000.00
+  ====================================================
+  Old balance: 8000.00
+    [WAL] Log #2 -> UNCOMMITTED  (WITHDRAWAL, account=5, 8000.00->-42000.00)
+  [ERROR] Insufficient funds. Balance: 8000.00, Requested: 50000.00
+  [PG] ROLLBACK -- balance unchanged.
+    [WAL] Log #2 -> ROLLED_BACK
+\end{lstlisting}
+
+\subsection{Crash Simulation (Option 4)}
+
+\begin{lstlisting}[style=jsonstyle, caption={Crash simulation terminal output}]
+  ====================================================
+  CRASH SIMULATION -- WITHDRAWAL
+  Account : ACC-00001  |  Amount: 3000.00
+  ====================================================
+  Current balance: 11500.00
+    [WAL] Log #3 -> UNCOMMITTED  (WITHDRAWAL, account=1, ...)
+  [PG]  Balance changed: 11500.00 -> 8500.00
+  [PG]  (Change applied but NOT yet committed)
+
+  *** SYSTEM CRASH -- Exception raised! ***
+  *** COMMIT was never executed.        ***
+
+  [PG]  Connection closed -> PG auto-rollback
+        (PG balance restored to 11500.00)
+  [WAL] Log #3 still UNCOMMITTED in MongoDB
+  -> Run Recovery Manager (option 5) to fix the database.
+\end{lstlisting}
+
+\subsection{Recovery Manager (Option 5)}
+
+\begin{lstlisting}[style=jsonstyle, caption={Recovery Manager terminal output}]
+  ####################################################
+  RECOVERY MANAGER -- Starting Recovery
+  ####################################################
+
+  -- Phase 1: ANALYSIS --
+  Scanning MongoDB WAL logs...
+  Found 1 UNCOMMITTED log(s) -> need UNDO
+  Found 5 COMMITTED   log(s) -> check REDO
+
+  Crash victims (will be UNDONE):
+    log_id=3  account_id=1  type=WITHDRAWAL  old=11500.00  new=8500.00
+
+  -- Phase 2: UNDO --
+  Restoring 1 account(s) to pre-crash state...
+
+  UNDO log_id=3  account_id=1
+    PG balance now : 11500.00
+    Restoring to   : 11500.00  <- from WAL log
+    Already at old_balance. UNDO already done. Skipping.
+
+  -- Phase 3: REDO --
+  v All committed transactions consistent. No REDO needed.
+
+  ####################################################
+  RECOVERY COMPLETE
+  UNDO applied : 0   (PG already consistent -- auto-rollback handled it)
+  REDO applied : 0
+  PostgreSQL is now in a consistent state.
+  ####################################################
+\end{lstlisting}
+
+% ────────────────────────────────────────────────────────────
+\chapter{Advantages and Limitations}
+
+\section{Advantages}
+
+\begin{enumerate}
+  \item \textbf{Educational Clarity}: Every step of WAL and recovery is
+        visible in the terminal output. Students can trace exactly what
+        happens to both databases at each transaction stage.
+
+  \item \textbf{Polyglot Persistence}: Demonstrates a hybrid architecture
+        where two databases complement each other --- a real-world pattern
+        used in modern applications.
+
+  \item \textbf{Practical Implementation}: The entire system runs on a
+        single laptop using freely available software (PostgreSQL, MongoDB,
+        Python).
+
+  \item \textbf{Observable Recovery}: Unlike built-in DBMS recovery which
+        is invisible to users, this system makes recovery explicit and
+        observable through MongoDB queries and terminal output.
+
+  \item \textbf{Idempotent Recovery}: The recovery manager can be run
+        multiple times safely, demonstrating a key property of robust
+        recovery systems.
+
+  \item \textbf{Modular Design}: Each Python module is focused on one
+        responsibility, making the code easy to understand, extend, and
+        explain during viva.
+\end{enumerate}
+
+\section{Limitations}
+
+\begin{enumerate}
+  \item \textbf{Single-User Only}: The system does not handle concurrent
+        transactions. Running two transactions simultaneously could
+        produce incorrect results.
+
+  \item \textbf{No Checkpoint Support}: A full ARIES implementation uses
+        checkpoints to limit how far back in the log recovery must scan.
+        Our system always scans all logs.
+
+  \item \textbf{No LSN Chain}: Log Sequence Numbers link log records for
+        ordered undo/redo. Our system uses timestamps and log\_id ordering,
+        which is less precise.
+
+  \item \textbf{Simplified Crash Model}: Our crash simulation uses a
+        Python exception. A real crash (power loss, OS kill) has more
+        complex storage-level effects.
+
+  \item \textbf{No Page-Level Recovery}: Our system operates at the
+        account/row level. Real DBMS recovery operates at the page level
+        for finer-grained control.
+
+  \item \textbf{MongoDB Not Crash-Safe by Default}: If MongoDB itself
+        crashes before the log insert completes, the log is also lost.
+        A production system would require MongoDB with journaling enabled
+        and write concern set to ``majority''.
+\end{enumerate}
+
+% ────────────────────────────────────────────────────────────
+\chapter{Viva Preparation}
+
+\section{Expected Teacher Questions and Answers}
+
+\subsection{Q1: What is Write-Ahead Logging?}
+
+\textbf{Answer:} Write-Ahead Logging is the rule that a log record must be
+written to stable storage \textit{before} the data change it describes is
+applied. In our system, we insert a document into MongoDB's \texttt{wal\_logs}
+collection before running the \texttt{UPDATE Account SET balance = ...}
+statement in PostgreSQL. This guarantees that even if PostgreSQL crashes
+mid-update, the log exists and we know what to undo.
+
+\subsection{Q2: What is the difference between UNDO and REDO?}
+
+\textbf{Answer:}
+\begin{itemize}
+  \item \textbf{UNDO}: Reverses an \textit{uncommitted} transaction by
+        restoring \texttt{old\_balance} (read from the WAL log). Used for
+        crash victims that never reached COMMIT.
+  \item \textbf{REDO}: Re-applies a \textit{committed} transaction by
+        applying \texttt{new\_balance} (from the WAL log). Used when a
+        committed change was lost before being flushed to PostgreSQL disk.
+\end{itemize}
+
+\subsection{Q3: How do you identify uncommitted transactions after a crash?}
+
+\textbf{Answer:} We query MongoDB for all documents where
+\texttt{status = "UNCOMMITTED"}. These are transactions that wrote a WAL
+log but never had their status updated to \texttt{COMMITTED} or
+\texttt{ROLLED\_BACK} --- the crash happened between those steps.
+
+\subsection{Q4: Why use MongoDB for WAL logs instead of PostgreSQL?}
+
+\textbf{Answer:} MongoDB is used because:
+(1) Log inserts are fast and lightweight without transaction overhead.
+(2) MongoDB is independent of the PostgreSQL transaction --- a PG rollback
+does not affect the MongoDB log.
+(3) JSON documents are flexible and human-readable, making logs easy to
+inspect and demonstrate.
+(4) It demonstrates polyglot persistence --- using each database for what
+it does best.
+
+\subsection{Q5: What is ACID? How does your system demonstrate it?}
+
+\textbf{Answer:}
+\begin{itemize}
+  \item \textbf{Atomicity}: Transfer uses one \texttt{conn.commit()} for
+        both account updates. If one fails, both rollback.
+  \item \textbf{Consistency}: CHECK constraints and FK constraints in
+        PostgreSQL prevent invalid data (e.g., negative balance).
+  \item \textbf{Isolation}: PostgreSQL handles concurrent isolation via
+        its transaction model (one connection at a time in our demo).
+  \item \textbf{Durability}: WAL log is written first, ensuring the
+        operation can be recovered even after a crash.
+\end{itemize}
+
+\subsection{Q6: How is your recovery similar to ARIES?}
+
+\textbf{Answer:} ARIES has three phases: Analysis, Redo, Undo. Our system
+follows the same three phases. The difference is that ARIES uses Log Sequence
+Numbers for precise ordering, maintains a dirty page table, and operates at
+the page level. Our system uses timestamps and log\_id for ordering, operates
+at the account row level, and is simplified for undergraduate demonstration.
+
+\subsection{Q7: What is polyglot persistence?}
+
+\textbf{Answer:} Polyglot persistence means using multiple database
+technologies in one application, each chosen for its strengths. In our
+system, PostgreSQL handles ACID-compliant relational banking data while
+MongoDB handles flexible, fast-insert WAL log documents. Together they form
+a more capable system than either alone.
+
+\subsection{Q8: Show me the WAL log in MongoDB right after a crash.}
+
+\textbf{Answer:} Run option 4 from the menu, then in mongosh run:
+\begin{lstlisting}[style=jsonstyle]
+use("bank_recovery_logs")
+db.wal_logs.find({ status: "UNCOMMITTED" })
+\end{lstlisting}
+This shows the log entry written before the crash, still showing
+\texttt{UNCOMMITTED} because the system never reached the COMMIT step.
+
+\section{Key Concepts Quick Reference}
+
+\begin{table}[H]
+\centering
+\caption{Quick Reference for Viva}
+\begin{tabularx}{\textwidth}{lX}
+\toprule
+\textbf{Concept} & \textbf{One-line explanation} \\
+\midrule
+WAL & Log first, then update the database \\
+UNCOMMITTED & Transaction started but crash happened before COMMIT \\
+UNDO & Restore old\_balance to reverse an uncommitted transaction \\
+REDO & Re-apply new\_balance for a committed but lost transaction \\
+Atomicity & All steps of a transaction succeed or all are reversed \\
+Durability & Committed data survives crashes (WAL makes this possible) \\
+Polyglot & Two databases used together, each for its strength \\
+Idempotency & Recovery gives same result whether run once or many times \\
+\bottomrule
+\end{tabularx}
+\end{table}

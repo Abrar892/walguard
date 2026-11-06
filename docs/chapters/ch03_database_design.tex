@@ -1,0 +1,307 @@
+% ============================================================
+% ch03_database_design.tex
+% PostgreSQL Schema + MongoDB WAL Design
+% ============================================================
+
+\chapter{PostgreSQL Database Design}
+
+\section{Schema Overview}
+
+The PostgreSQL database \texttt{bank\_recovery\_db} contains six tables.
+The \texttt{old\_balance} and \texttt{new\_balance} columns in
+\texttt{Transaction\_Record} are critical --- they mirror the WAL log fields
+and enable recovery directly from the relational database when needed.
+
+\section{Table Definitions}
+
+\subsection{Branch Table}
+
+\begin{lstlisting}[style=sqlstyle, caption={Branch Table}]
+CREATE TABLE Branch (
+    branch_id      SERIAL       PRIMARY KEY,
+    branch_name    VARCHAR(100) NOT NULL,
+    branch_city    VARCHAR(50)  NOT NULL,
+    branch_address TEXT,
+    contact_number VARCHAR(20),
+    created_at     TIMESTAMP    DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT chk_branch_name CHECK (TRIM(branch_name) <> '')
+);
+\end{lstlisting}
+
+\subsection{Customer Table}
+
+\begin{lstlisting}[style=sqlstyle, caption={Customer Table}]
+CREATE TABLE Customer (
+    customer_id    SERIAL       PRIMARY KEY,
+    first_name     VARCHAR(50)  NOT NULL,
+    last_name      VARCHAR(50)  NOT NULL,
+    email          VARCHAR(100) UNIQUE NOT NULL,
+    contact_number VARCHAR(20),
+    address        TEXT,
+    date_of_birth  DATE,
+    created_at     TIMESTAMP    DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT chk_email CHECK (email LIKE '%@%.%'),
+    CONSTRAINT chk_dob   CHECK (date_of_birth < CURRENT_DATE)
+);
+\end{lstlisting}
+
+\subsection{Account Table}
+
+\begin{lstlisting}[style=sqlstyle, caption={Account Table --- Core Banking Entity}]
+CREATE TABLE Account (
+    account_id     SERIAL        PRIMARY KEY,
+    customer_id    INT           NOT NULL,
+    branch_id      INT           NOT NULL,
+    account_number VARCHAR(20)   UNIQUE NOT NULL,
+    account_type   VARCHAR(30)   DEFAULT 'SAVINGS',
+    balance        DECIMAL(12,2) DEFAULT 0.00,
+    status         VARCHAR(20)   DEFAULT 'ACTIVE',
+    created_at     TIMESTAMP     DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT fk_account_customer
+        FOREIGN KEY (customer_id) REFERENCES Customer(customer_id)
+        ON DELETE RESTRICT,
+    CONSTRAINT fk_account_branch
+        FOREIGN KEY (branch_id) REFERENCES Branch(branch_id)
+        ON DELETE RESTRICT,
+    CONSTRAINT chk_account_type
+        CHECK (account_type IN ('SAVINGS','CURRENT','FIXED_DEPOSIT')),
+    CONSTRAINT chk_account_status
+        CHECK (status IN ('ACTIVE','INACTIVE','FROZEN','CLOSED')),
+    CONSTRAINT chk_balance CHECK (balance >= 0.00)
+);
+\end{lstlisting}
+
+\subsection{Transaction\_Record Table}
+
+\begin{lstlisting}[style=sqlstyle, caption={Transaction\_Record --- WAL-mirroring balance columns}]
+CREATE TABLE Transaction_Record (
+    transaction_id     SERIAL        PRIMARY KEY,
+    account_id         INT           NOT NULL,
+    transaction_type   VARCHAR(20),
+    amount             DECIMAL(12,2) NOT NULL CHECK (amount > 0),
+    old_balance        DECIMAL(12,2) NOT NULL, -- Used in UNDO
+    new_balance        DECIMAL(12,2) NOT NULL, -- Used in REDO
+    transaction_status VARCHAR(20)   DEFAULT 'PENDING',
+    transaction_time   TIMESTAMP     DEFAULT CURRENT_TIMESTAMP,
+    notes              TEXT,
+    CONSTRAINT fk_transaction_account
+        FOREIGN KEY (account_id) REFERENCES Account(account_id),
+    CONSTRAINT chk_txn_type
+        CHECK (transaction_type IN
+              ('DEPOSIT','WITHDRAWAL','TRANSFER_IN','TRANSFER_OUT')),
+    CONSTRAINT chk_txn_status
+        CHECK (transaction_status IN
+              ('PENDING','COMMITTED','ROLLED_BACK'))
+);
+\end{lstlisting}
+
+\begin{conceptbox}
+\textbf{Key Design Decision:} \texttt{old\_balance} and \texttt{new\_balance}
+are stored in \texttt{Transaction\_Record} and also in the MongoDB WAL log.
+This redundancy is intentional --- it means recovery can use either source
+to identify what to undo or redo.
+\end{conceptbox}
+
+\subsection{Employee Table}
+
+\begin{lstlisting}[style=sqlstyle, caption={Employee Table}]
+CREATE TABLE Employee (
+    employee_id    SERIAL      PRIMARY KEY,
+    branch_id      INT         NOT NULL,
+    first_name     VARCHAR(50) NOT NULL,
+    last_name      VARCHAR(50) NOT NULL,
+    role           VARCHAR(50) DEFAULT 'TELLER',
+    email          VARCHAR(100) UNIQUE,
+    hire_date      DATE,
+    CONSTRAINT fk_employee_branch
+        FOREIGN KEY (branch_id) REFERENCES Branch(branch_id),
+    CONSTRAINT chk_role
+        CHECK (role IN ('MANAGER','TELLER','LOAN_OFFICER','CASHIER'))
+);
+\end{lstlisting}
+
+\subsection{Loan Table}
+
+\begin{lstlisting}[style=sqlstyle, caption={Loan Table}]
+CREATE TABLE Loan (
+    loan_id       SERIAL        PRIMARY KEY,
+    customer_id   INT           NOT NULL,
+    account_id    INT           NOT NULL,
+    loan_type     VARCHAR(50)   DEFAULT 'PERSONAL',
+    loan_amount   DECIMAL(12,2) NOT NULL CHECK (loan_amount > 0),
+    interest_rate DECIMAL(5,2)  NOT NULL,
+    start_date    DATE,
+    end_date      DATE,
+    loan_status   VARCHAR(20)   DEFAULT 'ACTIVE',
+    CONSTRAINT fk_loan_customer
+        FOREIGN KEY (customer_id) REFERENCES Customer(customer_id),
+    CONSTRAINT fk_loan_account
+        FOREIGN KEY (account_id) REFERENCES Account(account_id),
+    CONSTRAINT chk_loan_type
+        CHECK (loan_type IN ('HOME','CAR','PERSONAL','EDUCATION','BUSINESS')),
+    CONSTRAINT chk_loan_status
+        CHECK (loan_status IN ('ACTIVE','CLOSED','DEFAULTED'))
+);
+\end{lstlisting}
+
+\section{Sample Data}
+
+\begin{lstlisting}[style=sqlstyle, caption={Sample INSERT statements}]
+-- Branch
+INSERT INTO Branch (branch_name, branch_city, branch_address)
+VALUES ('Main Branch', 'Lahore', '12 Mall Road, Lahore');
+
+-- Customer
+INSERT INTO Customer (first_name, last_name, email, date_of_birth)
+VALUES ('Ali', 'Raza', 'ali.raza@gmail.com', '1990-03-15');
+
+-- Account
+INSERT INTO Account (customer_id, branch_id, account_number,
+                     account_type, balance)
+VALUES (1, 1, 'ACC-00001', 'SAVINGS', 10000.00);
+
+-- Transaction with both balance fields (for recovery)
+INSERT INTO Transaction_Record
+    (account_id, transaction_type, amount,
+     old_balance, new_balance, transaction_status, notes)
+VALUES (1, 'DEPOSIT', 2000.00, 8000.00, 10000.00,
+        'COMMITTED', 'Initial deposit');
+\end{lstlisting}
+
+% ────────────────────────────────────────────────────────────
+\chapter{MongoDB WAL Design}
+
+\section{Database and Collections}
+
+MongoDB database: \texttt{bank\_recovery\_logs}
+
+\begin{table}[H]
+\centering
+\caption{MongoDB Collections}
+\begin{tabularx}{\textwidth}{llX}
+\toprule
+\textbf{Collection} & \textbf{Written By} & \textbf{Purpose} \\
+\midrule
+wal\_logs       & MongoLogger (every transaction) & WAL entries — one per operation \\
+recovery\_logs  & RecoveryManager                 & Audit trail of UNDO/REDO actions \\
+crash\_log      & CrashSimulator                  & Crash event records \\
+system\_config  & MongoLogger                     & log\_id auto-increment counter \\
+\bottomrule
+\end{tabularx}
+\end{table}
+
+\section{wal\_logs Document Structure}
+
+\begin{lstlisting}[style=jsonstyle, caption={WAL Log Document --- UNCOMMITTED state (after crash)}]
+{
+  "log_id":      8,
+  "session_id":  "crash_a1b2c3",
+  "account_id":  1,
+  "txn_type":    "WITHDRAWAL",
+  "old_balance": 10000.00,
+  "new_balance":  7000.00,
+  "amount":       3000.00,
+  "status":      "UNCOMMITTED",
+  "timestamp":   "2026-05-20T08:00:00Z",
+  "notes":       "CRASH_DEMO: will not commit"
+}
+\end{lstlisting}
+
+\begin{lstlisting}[style=jsonstyle, caption={WAL Log Document --- COMMITTED state (normal flow)}]
+{
+  "log_id":      1,
+  "session_id":  "sess_f3a7b1",
+  "account_id":  1,
+  "txn_type":    "DEPOSIT",
+  "old_balance": 8000.00,
+  "new_balance": 10000.00,
+  "amount":      2000.00,
+  "status":      "COMMITTED",
+  "timestamp":   "2026-05-20T08:00:00Z",
+  "notes":       "Deposit to ACC-00001"
+}
+\end{lstlisting}
+
+\section{Transaction Status Lifecycle}
+
+\begin{figure}[H]
+\centering
+\begin{tikzpicture}[
+  state/.style = {draw, rounded corners=6pt,
+                  minimum width=3cm, minimum height=0.9cm,
+                  align=center, font=\small\bfseries},
+  arr/.style   = {-{Latex[length=3mm]}, thick},
+]
+\node[state, fill=yellow!30, draw=orange!70]
+  (un) at (0,0)   {UNCOMMITTED};
+\node[state, fill=green!20, draw=green!60]
+  (co) at (-3,-2.5) {COMMITTED};
+\node[state, fill=red!15,  draw=red!60]
+  (rb) at (3, -2.5) {ROLLED\_BACK};
+
+\draw[arr] (un) -- node[left, font=\footnotesize]
+  {PG commit\\succeeds} (co);
+\draw[arr] (un) -- node[right, font=\footnotesize]
+  {ROLLBACK or\\crash recovery} (rb);
+\draw[arr, dashed, gray] (-0.5, 0.8) -- node[above, font=\footnotesize]
+  {WAL log written} (un.north);
+\end{tikzpicture}
+\caption{WAL Log Status Lifecycle}
+\label{fig:status}
+\end{figure}
+
+\section{recovery\_logs Document}
+
+\begin{lstlisting}[style=jsonstyle, caption={Recovery Log --- written by RecoveryManager after UNDO}]
+{
+  "action":      "UNDO",
+  "account_id":  1,
+  "before_bal":  7000.00,
+  "after_bal":   10000.00,
+  "reason":      "CRASH_DETECTED",
+  "timestamp":   "2026-05-20T08:01:00Z"
+}
+\end{lstlisting}
+
+\section{Useful MongoDB Queries}
+
+\begin{lstlisting}[style=jsonstyle, caption={Key mongosh queries for demo and viva}]
+// Find all UNCOMMITTED logs (crash victims)
+db.wal_logs.find({ status: "UNCOMMITTED" })
+
+// Find all COMMITTED logs
+db.wal_logs.find({ status: "COMMITTED" })
+
+// Count by status (shows system state at a glance)
+db.wal_logs.aggregate([
+    { $group: { _id: "$status", count: { $sum: 1 } } }
+])
+
+// Show UNDO plan: what to restore for each crash victim
+db.wal_logs.find(
+    { status: "UNCOMMITTED" },
+    { log_id:1, account_id:1, old_balance:1, _id:0 }
+)
+
+// View all recovery actions taken
+db.recovery_logs.find({}, { _id: 0 })
+\end{lstlisting}
+
+\section{Why MongoDB for WAL Logs?}
+
+\begin{table}[H]
+\centering
+\caption{PostgreSQL vs MongoDB for Log Storage}
+\begin{tabularx}{\textwidth}{lXX}
+\toprule
+\textbf{Criterion} & \textbf{PostgreSQL} & \textbf{MongoDB} \\
+\midrule
+Schema flexibility & Fixed columns only & Any fields per document \\
+Insert speed & Transaction overhead & Lightweight insert \\
+Log independence & Affected by PG crash & Independent of PG failures \\
+Readability & Binary/SQL format & Human-readable JSON \\
+Query language & SQL & Rich document queries \\
+Status updates & UPDATE statement & \$set operator \\
+\bottomrule
+\end{tabularx}
+\end{table}

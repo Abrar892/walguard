@@ -1,0 +1,358 @@
+% ============================================================
+% ch04_implementation.tex
+% WAL, Undo/Redo, Crash Simulation, Python Modules
+% ============================================================
+
+\chapter{Write-Ahead Logging Implementation}
+
+\section{The WAL Protocol}
+
+Every transaction in this system follows a strict 6-step sequence defined
+in \texttt{transaction\_manager.py}. Steps must execute in this exact order:
+
+\begin{table}[H]
+\centering
+\caption{WAL Transaction Steps}
+\begin{tabularx}{\textwidth}{clX}
+\toprule
+\textbf{Step} & \textbf{Action} & \textbf{Details} \\
+\midrule
+1 & Read old\_balance & SELECT balance FROM Account WHERE account\_id = X \\
+2 & \textbf{Write WAL log} & MongoDB insert (status=UNCOMMITTED) --- BEFORE any PG change \\
+3 & Update PostgreSQL & UPDATE Account SET balance = new\_balance \\
+4 & Insert Transaction\_Record & Records both old and new balance values \\
+5 & conn.commit() & PostgreSQL transaction finalized \\
+6 & mark\_committed() & MongoDB log updated to COMMITTED \\
+\bottomrule
+\end{tabularx}
+\end{table}
+
+\section{Deposit Implementation}
+
+\begin{lstlisting}[style=pythonstyle, caption={Deposit method --- WAL sequence in Python}]
+def deposit(self, account_number, amount, notes=""):
+    conn   = get_pg_connection()
+    cur    = conn.cursor()
+    log_id = None
+    try:
+        # Step 1: Read old balance
+        acc_id, old_bal = self._get_account(cur, account_number)
+        new_bal = old_bal + amount
+
+        # Step 2: Write WAL log BEFORE PostgreSQL update (WAL rule)
+        log_id = self.logger.write_log(
+            session_id  = self.session_id,
+            account_id  = acc_id,
+            txn_type    = "DEPOSIT",
+            old_balance = old_bal,      # stored for UNDO
+            new_balance = new_bal,      # stored for REDO
+            amount      = amount,
+        )
+
+        # Step 3: Update PostgreSQL balance
+        cur.execute("UPDATE Account SET balance = %s WHERE account_id = %s",
+                    (new_bal, acc_id))
+
+        # Step 4: Insert Transaction_Record
+        self._record_transaction(cur, acc_id, "DEPOSIT",
+                                 amount, old_bal, new_bal)
+
+        # Step 5: COMMIT PostgreSQL
+        conn.commit()
+
+        # Step 6: Update WAL log to COMMITTED
+        self.logger.mark_committed(log_id)
+
+    except Exception as e:
+        conn.rollback()                        # Reverse all PG changes
+        if log_id:
+            self.logger.mark_rolled_back(log_id, reason=str(e))
+    finally:
+        cur.close(); conn.close()
+\end{lstlisting}
+
+\section{Transfer --- Atomic Two-Leg Transaction}
+
+A fund transfer involves two accounts and demonstrates ACID Atomicity:
+both legs commit together or both are rolled back together.
+
+\begin{lstlisting}[style=pythonstyle, caption={Transfer --- two WAL logs, one PG commit}]
+# Step 2: Write BOTH WAL logs BEFORE any PostgreSQL update
+log_out_id = self.logger.write_log(
+    account_id=from_id, txn_type="TRANSFER_OUT",
+    old_balance=from_bal, new_balance=from_new, amount=amount
+)
+log_in_id = self.logger.write_log(
+    account_id=to_id, txn_type="TRANSFER_IN",
+    old_balance=to_bal, new_balance=to_new, amount=amount
+)
+
+# Step 3: Apply both PostgreSQL updates
+cur.execute("UPDATE Account SET balance=%s WHERE account_id=%s",
+            (from_new, from_id))
+cur.execute("UPDATE Account SET balance=%s WHERE account_id=%s",
+            (to_new, to_id))
+
+# Step 5: ONE commit covers both updates (Atomicity)
+conn.commit()
+
+# Step 6: Mark both WAL logs COMMITTED
+self.logger.mark_committed(log_out_id)
+self.logger.mark_committed(log_in_id)
+\end{lstlisting}
+
+% ────────────────────────────────────────────────────────────
+\chapter{Crash Simulation}
+
+\section{How a Crash is Simulated}
+
+In \texttt{crash\_simulator.py}, a \texttt{RuntimeError} is raised between
+Step 3 (PG update) and Step 5 (PG commit). This creates the same state
+that a real OS crash would leave:
+
+\begin{lstlisting}[style=pythonstyle, caption={crash\_simulator.py --- crash injection point}]
+def simulate_crash(self, account_number, amount, txn_type="WITHDRAWAL"):
+    conn   = get_pg_connection()
+    cur    = conn.cursor()
+    log_id = None
+    try:
+        acc_id, old_bal = _get_account(cur, account_number)
+        new_bal = old_bal - amount
+
+        # Step 2: WAL log written (UNCOMMITTED) --- this PERSISTS
+        log_id = self.logger.write_log(
+            session_id=self.session_id, account_id=acc_id,
+            txn_type=txn_type, old_balance=old_bal,
+            new_balance=new_bal, amount=amount,
+            notes="CRASH_DEMO: will not commit"
+        )
+
+        # Step 3: PG balance changed
+        cur.execute("UPDATE Account SET balance=%s WHERE account_id=%s",
+                    (new_bal, acc_id))
+
+        # *** CRASH HERE --- before conn.commit() ***
+        raise RuntimeError("SIMULATED CRASH")
+
+    except RuntimeError:
+        conn.rollback()     # PG auto-rolls back (connection drop)
+        # MongoDB log stays UNCOMMITTED <- recovery target
+        return log_id
+\end{lstlisting}
+
+\section{State After Crash}
+
+After \texttt{simulate\_crash()} returns:
+
+\begin{table}[H]
+\centering
+\caption{Database State After Crash}
+\begin{tabularx}{\textwidth}{lX}
+\toprule
+\textbf{Database} & \textbf{State} \\
+\midrule
+MongoDB wal\_logs & Log entry exists with \texttt{status = "UNCOMMITTED"} \\
+PostgreSQL Account & Balance is restored to old\_balance (PG auto-rollback) \\
+PostgreSQL Transaction\_Record & No record exists (INSERT was in the same transaction) \\
+\bottomrule
+\end{tabularx}
+\end{table}
+
+\begin{conceptbox}
+\textbf{Important distinction for viva:}
+In our simulation, PostgreSQL auto-rolls-back because we close the connection.
+In a real crash, the OS terminates the process and PostgreSQL detects the
+lost connection during its next startup. The MongoDB log remains UNCOMMITTED
+in both cases --- that is the key state the Recovery Manager reads.
+\end{conceptbox}
+
+% ────────────────────────────────────────────────────────────
+\chapter{Recovery Manager}
+
+\section{Three-Phase Recovery}
+
+The \texttt{RecoveryManager} implements a simplified ARIES-inspired process
+in three sequential phases:
+
+\begin{lstlisting}[style=pythonstyle, caption={recovery\_manager.py --- main entry point}]
+def run_recovery(self):
+    # Phase 1: Analysis
+    uncommitted, committed = self._phase_analysis()
+
+    # Phase 2: UNDO uncommitted transactions
+    undo_count = self._phase_undo(uncommitted)
+
+    # Phase 3: REDO committed transactions if PG state is wrong
+    redo_count = self._phase_redo(committed)
+\end{lstlisting}
+
+\section{Phase 1: Analysis}
+
+Reads all WAL logs from MongoDB and classifies them:
+
+\begin{lstlisting}[style=pythonstyle, caption={Analysis phase}]
+def _phase_analysis(self):
+    uncommitted = self.logger.get_uncommitted()  # status="UNCOMMITTED"
+    committed   = self.logger.get_committed()    # status="COMMITTED"
+    return uncommitted, committed
+\end{lstlisting}
+
+\section{Phase 2: UNDO}
+
+For each UNCOMMITTED log (newest first), restores \texttt{old\_balance}:
+
+\begin{lstlisting}[style=pythonstyle, caption={UNDO phase --- restore old\_balance}]
+def _phase_undo(self, uncommitted_logs):
+    for log in uncommitted_logs:
+        acc_id      = log["account_id"]
+        old_balance = log["old_balance"]   # <- from WAL log
+        log_id      = log["log_id"]
+
+        # Read current PG balance
+        cur.execute("SELECT balance FROM Account WHERE account_id=%s",
+                    (acc_id,))
+        pg_balance = float(cur.fetchone()[0])
+
+        # Idempotency: skip if already restored
+        if abs(pg_balance - old_balance) < 0.001:
+            self.logger.mark_rolled_back(log_id, "Already restored")
+            continue
+
+        # Apply UNDO: restore old_balance in PostgreSQL
+        cur.execute("UPDATE Account SET balance=%s WHERE account_id=%s",
+                    (old_balance, acc_id))
+        conn.commit()
+
+        # Update WAL log -> ROLLED_BACK
+        self.logger.mark_rolled_back(log_id, "UNDO by RecoveryManager")
+
+        # Write recovery audit entry
+        self.logger.write_recovery_log(
+            action="UNDO", account_id=acc_id,
+            before_bal=pg_balance, after_bal=old_balance,
+            reason="CRASH_DETECTED"
+        )
+\end{lstlisting}
+
+\section{Phase 3: REDO}
+
+For each COMMITTED log, checks if PostgreSQL already reflects the committed
+change. If not, re-applies \texttt{new\_balance}:
+
+\begin{lstlisting}[style=pythonstyle, caption={REDO phase --- re-apply new\_balance if PG state is wrong}]
+def _phase_redo(self, committed_logs):
+    for log in committed_logs:
+        acc_id      = log["account_id"]
+        new_balance = log["new_balance"]   # <- from WAL log
+
+        cur.execute("SELECT balance FROM Account WHERE account_id=%s",
+                    (acc_id,))
+        pg_balance = float(cur.fetchone()[0])
+
+        # If PG already matches -> no REDO needed (idempotent)
+        if abs(pg_balance - new_balance) < 0.001:
+            continue
+
+        # REDO: re-apply new_balance
+        cur.execute("UPDATE Account SET balance=%s WHERE account_id=%s",
+                    (new_balance, acc_id))
+        conn.commit()
+
+        self.logger.write_recovery_log(
+            action="REDO", account_id=acc_id,
+            before_bal=pg_balance, after_bal=new_balance,
+            reason="COMMIT_LOSS"
+        )
+\end{lstlisting}
+
+\section{Idempotency}
+
+A key property of the recovery process is \textbf{idempotency} --- running
+recovery multiple times produces the same result as running it once.
+
+\begin{itemize}
+  \item \textbf{UNDO idempotency}: If PG balance already equals
+        \texttt{old\_balance}, UNDO is skipped.
+  \item \textbf{REDO idempotency}: If PG balance already equals
+        \texttt{new\_balance}, REDO is skipped.
+\end{itemize}
+
+This ensures the Recovery Manager is safe to run even if it is interrupted
+partway through.
+
+% ────────────────────────────────────────────────────────────
+\chapter{Python Module Explanation}
+
+\section{Module Overview}
+
+\begin{table}[H]
+\centering
+\caption{Python Modules and ADBMS Concepts}
+\begin{tabularx}{\textwidth}{llX}
+\toprule
+\textbf{Module} & \textbf{Concept} & \textbf{Why it exists} \\
+\midrule
+db\_config.py & Polyglot Persistence & Central DB connection management \\
+mongo\_logger.py & WAL & All MongoDB log operations in one place \\
+transaction\_manager.py & Transactions, ACID & Enforces WAL sequence for every transaction \\
+crash\_simulator.py & Crash Recovery & Creates testable inconsistency scenarios \\
+recovery\_manager.py & UNDO/REDO, ARIES & Detects and repairs post-crash inconsistency \\
+main.py & --- & Interactive demo runner for viva/presentation \\
+\bottomrule
+\end{tabularx}
+\end{table}
+
+\section{db\_config.py}
+
+\begin{lstlisting}[style=pythonstyle, caption={db\_config.py --- connection functions}]
+def get_pg_connection():
+    conn = psycopg2.connect(host="localhost", dbname="bank_recovery_db",
+                            user="postgres", password="your_password")
+    conn.autocommit = False   # Manual transaction control
+    return conn
+
+def get_mongo_db():
+    client = MongoClient("mongodb://localhost:27017/")
+    return client["bank_recovery_logs"]
+\end{lstlisting}
+
+\textbf{ADBMS Concept:} \texttt{autocommit=False} is the key setting.
+It means every SQL statement is inside an implicit transaction until we
+call \texttt{conn.commit()} or \texttt{conn.rollback()}.
+
+\section{mongo\_logger.py}
+
+The \texttt{write\_log()} method is the heart of the WAL system:
+
+\begin{lstlisting}[style=pythonstyle, caption={MongoLogger.write\_log() --- WAL insert}]
+def write_log(self, session_id, account_id, txn_type,
+              old_balance, new_balance, amount, notes=""):
+    log_id = self._next_log_id()
+    self.col.insert_one({
+        "log_id":      log_id,
+        "session_id":  session_id,
+        "account_id":  account_id,
+        "txn_type":    txn_type,
+        "old_balance": float(old_balance),   # UNDO uses this
+        "new_balance": float(new_balance),   # REDO uses this
+        "amount":      float(amount),
+        "status":      "UNCOMMITTED",        # Always starts UNCOMMITTED
+        "timestamp":   datetime.now(timezone.utc),
+        "notes":       notes,
+    })
+    return log_id
+\end{lstlisting}
+
+\section{main.py --- Demo Menu}
+
+\begin{lstlisting}[style=pythonstyle, caption={main.py menu structure}]
+actions = {
+    "1": menu_deposit,     # WAL + COMMIT demo
+    "2": menu_withdraw,    # WAL + COMMIT or ROLLBACK
+    "3": menu_transfer,    # Two-leg atomic transfer
+    "4": menu_crash,       # Crash before COMMIT
+    "5": menu_recovery,    # UNDO + REDO phases
+    "6": menu_show_logs,   # View MongoDB WAL logs
+    "7": menu_show_balances, # View PostgreSQL balances
+}
+\end{lstlisting}

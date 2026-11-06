@@ -1,0 +1,293 @@
+% ============================================================
+% main.tex — Log-Based Recovery System (ADBMS Final Project)
+% Compile with: pdflatex main.tex (run twice for TOC)
+% ============================================================
+\documentclass[12pt, a4paper]{report}
+
+% ── Packages ─────────────────────────────────────────────────
+\usepackage[utf8]{inputenc}
+\usepackage[T1]{fontenc}
+\usepackage[margin=1in]{geometry}
+\usepackage{graphicx}
+\usepackage{xcolor}
+\usepackage{listings}
+\usepackage{booktabs}
+\usepackage{tabularx}
+\usepackage{longtable}
+\usepackage{amsmath}
+\usepackage{hyperref}
+\usepackage{fancyhdr}
+\usepackage{titlesec}
+\usepackage{setspace}
+\usepackage{tocloft}
+\usepackage{enumitem}
+\usepackage{float}
+\usepackage{caption}
+\usepackage{subcaption}
+\usepackage{mdframed}
+\usepackage{tikz}
+\usetikzlibrary{shapes.geometric, arrows.meta, positioning, fit}
+
+% ── Hyperref setup ───────────────────────────────────────────
+\hypersetup{
+    colorlinks  = true,
+    linkcolor   = blue!70!black,
+    citecolor   = green!50!black,
+    urlcolor    = blue!70!black,
+    pdftitle    = {Log-Based Recovery System},
+    pdfauthor   = {ADBMS Final Project},
+}
+
+% ── Page style ───────────────────────────────────────────────
+\pagestyle{fancy}
+\fancyhf{}
+\fancyhead[L]{\small\textit{Log-Based Recovery System}}
+\fancyhead[R]{\small\textit{ADBMS Final Project}}
+\fancyfoot[C]{\thepage}
+\renewcommand{\headrulewidth}{0.4pt}
+
+% ── Chapter title formatting ─────────────────────────────────
+\titleformat{\chapter}[display]
+  {\normalfont\huge\bfseries\color{blue!70!black}}
+  {\chaptertitlename\ \thechapter}{10pt}{\Huge}
+\titlespacing*{\chapter}{0pt}{-10pt}{20pt}
+
+% ── Line spacing ─────────────────────────────────────────────
+\onehalfspacing
+
+% ── Code listing style ───────────────────────────────────────
+\definecolor{codebg}{rgb}{0.96,0.96,0.96}
+\definecolor{codeframe}{rgb}{0.7,0.7,0.9}
+\definecolor{keyword}{rgb}{0.0,0.3,0.7}
+\definecolor{comment}{rgb}{0.3,0.5,0.3}
+\definecolor{string}{rgb}{0.6,0.1,0.1}
+
+\lstdefinestyle{sqlstyle}{
+    language     = SQL,
+    backgroundcolor = \color{codebg},
+    frame        = single,
+    rulecolor    = \color{codeframe},
+    basicstyle   = \ttfamily\small,
+    keywordstyle = \color{keyword}\bfseries,
+    commentstyle = \color{comment}\itshape,
+    stringstyle  = \color{string},
+    breaklines   = true,
+    numbers      = left,
+    numberstyle  = \tiny\color{gray},
+    captionpos   = b,
+    tabsize      = 4,
+}
+
+\lstdefinestyle{pythonstyle}{
+    language     = Python,
+    backgroundcolor = \color{codebg},
+    frame        = single,
+    rulecolor    = \color{codeframe},
+    basicstyle   = \ttfamily\small,
+    keywordstyle = \color{keyword}\bfseries,
+    commentstyle = \color{comment}\itshape,
+    stringstyle  = \color{string},
+    breaklines   = true,
+    numbers      = left,
+    numberstyle  = \tiny\color{gray},
+    captionpos   = b,
+    tabsize      = 4,
+}
+
+\lstdefinestyle{jsonstyle}{
+    language     = {},
+    backgroundcolor = \color{codebg},
+    frame        = single,
+    rulecolor    = \color{codeframe},
+    basicstyle   = \ttfamily\small,
+    stringstyle  = \color{string},
+    breaklines   = true,
+    captionpos   = b,
+}
+
+% ── Custom box for notes ─────────────────────────────────────
+\newmdenv[
+  linecolor   = blue!40,
+  backgroundcolor = blue!5,
+  roundcorner = 5pt,
+  innertopmargin    = 8pt,
+  innerbottommargin = 8pt,
+]{conceptbox}
+
+% ── Front matter command ─────────────────────────────────────
+\newcommand{\HRule}{\rule{\linewidth}{0.5mm}}
+
+% ============================================================
+\begin{document}
+
+% ── Title Page ───────────────────────────────────────────────
+\begin{titlepage}
+\begin{center}
+
+\textsc{\large University of Engineering and Technology}\\[0.3cm]
+\textsc{\large Department of Computer Science}\\[0.5cm]
+\textsc{Advanced Database Management Systems (CS-4XX)}\\[0.3cm]
+\textsc{Final Project Report}\\[1.5cm]
+
+\HRule\\[0.5cm]
+{\huge \bfseries Log-Based Recovery System}\\[0.3cm]
+{\large \bfseries Using PostgreSQL and MongoDB}\\[0.3cm]
+\HRule\\[1.5cm]
+
+\begin{minipage}{0.48\textwidth}
+  \begin{flushleft}
+    \textbf{Submitted by:}\\[0.2cm]
+    Muhammad Abrar\\
+    Roll No: 2024-CS-59\\[0.5cm]
+    \textbf{Session:} 2024--2028\\
+    \textbf{Semester:} 4th
+  \end{flushleft}
+\end{minipage}
+\hfill
+\begin{minipage}{0.48\textwidth}
+  \begin{flushright}
+    \textbf{Submitted to:}\\[0.2cm]
+    [Instructor Name]\\
+    Assistant Professor\\
+    Dept. of Computer Science\\[0.5cm]
+    \textbf{Date:} May 2026
+  \end{flushright}
+\end{minipage}
+
+\vfill
+
+\begin{figure}[H]
+  \centering
+  \begin{tikzpicture}
+    \node[draw=blue!60, rounded corners=8pt, fill=blue!8,
+          minimum width=9cm, minimum height=2.5cm, align=center,
+          font=\bfseries\large] {
+      Log-Based Recovery System\\[6pt]
+      {\normalfont\normalsize PostgreSQL \quad+\quad MongoDB \quad+\quad Python}
+    };
+  \end{tikzpicture}
+\end{figure}
+
+\vfill
+{\small Submitted in partial fulfillment of the requirements for the\\
+Bachelor of Science in Computer Science degree.}
+
+\end{center}
+\end{titlepage}
+
+% ── Certificate Page ─────────────────────────────────────────
+\chapter*{Certificate}
+\addcontentsline{toc}{chapter}{Certificate}
+\thispagestyle{plain}
+
+\vspace{1cm}
+This is to certify that the project report titled:
+
+\vspace{0.5cm}
+\begin{center}
+{\large \bfseries ``Log-Based Recovery System Using PostgreSQL and MongoDB''}
+\end{center}
+\vspace{0.5cm}
+
+has been submitted by \textbf{Muhammad Abrar (Roll No: 2024-CS-59)} in partial
+fulfillment of the requirements for the degree of Bachelor of Science in
+Computer Science. The work is original and has been completed under my
+supervision for the course \textbf{Advanced Database Management Systems (ADBMS)}.
+
+\vspace{3cm}
+\begin{minipage}{0.45\textwidth}
+  \hrule\vspace{0.3cm}
+  \textbf{Supervisor's Signature}\\[0.2cm]
+  [Instructor Name]\\
+  Department of Computer Science
+\end{minipage}
+\hfill
+\begin{minipage}{0.45\textwidth}
+  \hrule\vspace{0.3cm}
+  \textbf{Student's Signature}\\[0.2cm]
+  Muhammad Abrar\\
+  Roll No: 2024-CS-59
+\end{minipage}
+
+% ── Declaration ──────────────────────────────────────────────
+\chapter*{Declaration}
+\addcontentsline{toc}{chapter}{Declaration}
+\thispagestyle{plain}
+
+I, \textbf{Muhammad Abrar}, Roll No \textbf{2024-CS-59}, hereby declare that
+the project report titled \textit{``Log-Based Recovery System Using PostgreSQL
+and MongoDB''} is my own work and has been written by me. All sources of
+information used in this report are duly cited and acknowledged. This project
+has not been submitted for any other degree or examination.
+
+\vspace{2cm}
+\begin{flushright}
+  \hrule\vspace{0.3cm}
+  Muhammad Abrar\\
+  Roll No: 2024-CS-59\\
+  Date: May 2026
+\end{flushright}
+
+% ── Acknowledgement ──────────────────────────────────────────
+\chapter*{Acknowledgement}
+\addcontentsline{toc}{chapter}{Acknowledgement}
+\thispagestyle{plain}
+
+I would like to express my sincere gratitude to my course instructor for
+providing guidance and insights throughout this project. The concepts of
+Write-Ahead Logging, crash recovery, and polyglot persistence introduced in
+the \textbf{Advanced Database Management Systems} course formed the foundation
+of this implementation.
+
+I would also like to thank the open-source communities behind
+\textbf{PostgreSQL} and \textbf{MongoDB} whose detailed documentation made
+understanding transaction management and NoSQL logging much easier.
+
+Finally, I thank my fellow students for their constructive feedback during the
+project development phase.
+
+% ── Abstract ─────────────────────────────────────────────────
+\chapter*{Abstract}
+\addcontentsline{toc}{chapter}{Abstract}
+\thispagestyle{plain}
+
+This project presents a simplified \textbf{Log-Based Recovery System} built
+for educational demonstration of core Advanced Database Management Systems
+(ADBMS) concepts. The system uses a \textbf{hybrid database architecture}
+combining PostgreSQL for structured transactional banking data and MongoDB for
+flexible Write-Ahead Log (WAL) storage.
+
+The implementation simulates real-world database recovery scenarios including
+transaction commits, rollbacks, system crashes, and recovery through
+\textbf{Undo} and \textbf{Redo} operations. A Python-based recovery module
+coordinates both databases, following a simplified ARIES-inspired three-phase
+recovery process: Analysis, Undo, and Redo.
+
+The project demonstrates key ADBMS concepts including ACID properties,
+Write-Ahead Logging, transaction lifecycle management, crash simulation,
+and \textbf{polyglot persistence} --- the use of multiple database technologies
+in a single system, each chosen for its strengths.
+
+The banking domain is used as a practical scenario to make abstract recovery
+concepts tangible and easy to demonstrate. The system is designed to be
+undergraduate-level, practical to implement within one week, and suitable for
+viva and presentation.
+
+\vspace{0.5cm}
+\noindent\textbf{Keywords:} Write-Ahead Logging, Undo/Redo Recovery, PostgreSQL,
+MongoDB, ACID Properties, Polyglot Persistence, Crash Recovery, ADBMS.
+
+% ── Table of Contents ────────────────────────────────────────
+\tableofcontents
+\listoffigures
+\listoftables
+
+% ── Include Chapters ─────────────────────────────────────────
+\include{chapters/ch01_introduction}
+\include{chapters/ch02_architecture}
+\include{chapters/ch03_database_design}
+\include{chapters/ch04_implementation}
+\include{chapters/ch05_results}
+\include{chapters/ch06_conclusion}
+
+\end{document}

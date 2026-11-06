@@ -1,0 +1,257 @@
+% ============================================================
+% ch01_introduction.tex
+% Chapters: Introduction, Problem Statement, Objectives,
+%           Literature Review, Existing vs Proposed System
+% ============================================================
+
+\chapter{Introduction}
+
+\section{Background}
+
+Modern database management systems must handle unexpected failures gracefully.
+When a system crashes mid-transaction, data can be left in an inconsistent
+state --- some changes applied, others lost. The mechanism that prevents
+permanent data loss is called \textbf{database recovery}, and it relies on
+\textbf{transaction logs} to determine what was committed and what was not.
+
+This project implements a simplified \textbf{Log-Based Recovery System} that
+demonstrates these concepts using two databases working together:
+
+\begin{itemize}
+  \item \textbf{PostgreSQL} --- a relational database storing structured
+        banking data (accounts, customers, transactions).
+  \item \textbf{MongoDB} --- a document database storing Write-Ahead Log
+        (WAL) entries that record every transaction before it is applied.
+\end{itemize}
+
+The combination of two database technologies in one system is called
+\textbf{polyglot persistence} --- a core concept in modern ADBMS.
+
+\section{Motivation}
+
+Traditional textbook explanations of database recovery are often abstract.
+This project makes recovery concepts tangible by:
+
+\begin{itemize}
+  \item Simulating real crashes during active transactions
+  \item Showing exactly what an UNCOMMITTED log looks like in MongoDB
+  \item Demonstrating how \textit{old\_balance} and \textit{new\_balance}
+        in a WAL log enable Undo and Redo operations
+  \item Running a recovery process that restores database consistency
+\end{itemize}
+
+The banking domain (deposits, withdrawals, transfers) provides a familiar
+scenario where inconsistency --- such as money being deducted without being
+credited --- is easy to understand and verify.
+
+\section{Scope of the Project}
+
+\begin{conceptbox}
+\textbf{This project is educational, not production-grade.}
+The goal is to demonstrate ADBMS concepts clearly at undergraduate level,
+not to implement a full DBMS recovery engine.
+\end{conceptbox}
+
+\noindent The scope includes:
+\begin{itemize}
+  \item Six PostgreSQL tables for banking data
+  \item Three MongoDB collections for WAL and recovery logs
+  \item Python modules for transactions, crash simulation, and recovery
+  \item A simplified three-phase recovery process inspired by ARIES
+\end{itemize}
+
+The scope excludes: full ARIES internals, LSN chains, buffer pool management,
+distributed recovery, and multi-user concurrency control.
+
+% ────────────────────────────────────────────────────────────
+\chapter{Problem Statement}
+
+Traditional relational databases are vulnerable during system crashes.
+When a database process is interrupted mid-transaction, two types of
+problems arise:
+
+\begin{enumerate}
+  \item \textbf{Dirty writes} --- changes applied to disk that were never
+        committed (should be undone).
+  \item \textbf{Lost commits} --- changes that were committed logically but
+        not yet flushed to disk before the crash (should be redone).
+\end{enumerate}
+
+Without a recovery mechanism, the database is left in an inconsistent state.
+For a banking system, this could mean:
+
+\begin{itemize}
+  \item A withdrawal deducted from the sender's account but the receiver's
+        credit was never applied.
+  \item A deposit appearing committed in the application but lost from
+        the database storage.
+  \item Balance values that match neither the pre-transaction state nor
+        the post-transaction state.
+\end{itemize}
+
+\noindent\textbf{The central problem this project solves:}
+
+\begin{conceptbox}
+How can a database system detect and repair inconsistencies caused by a
+crash, using only the information available in transaction log records?
+\end{conceptbox}
+
+% ────────────────────────────────────────────────────────────
+\chapter{Objectives}
+
+The primary objectives of this project are:
+
+\begin{enumerate}
+  \item \textbf{Implement Write-Ahead Logging (WAL)} --- Every transaction
+        writes a log record to MongoDB \textit{before} applying changes to
+        PostgreSQL.
+
+  \item \textbf{Simulate Crashes} --- Inject a system crash mid-transaction
+        to create an inconsistent database state for recovery testing.
+
+  \item \textbf{Implement UNDO Recovery} --- Identify UNCOMMITTED transactions
+        from WAL logs and restore \textit{old\_balance} in PostgreSQL.
+
+  \item \textbf{Implement REDO Recovery} --- Identify COMMITTED transactions
+        whose PostgreSQL changes were lost and re-apply \textit{new\_balance}.
+
+  \item \textbf{Demonstrate Polyglot Persistence} --- Use PostgreSQL and
+        MongoDB together, each for what it does best.
+
+  \item \textbf{Provide a Practical Demo} --- Create a menu-driven Python
+        application that demonstrates all concepts interactively.
+\end{enumerate}
+
+\noindent\textbf{ADBMS concepts covered:}
+
+\begin{table}[H]
+\centering
+\caption{ADBMS Concepts and Their Implementation}
+\begin{tabularx}{\textwidth}{lX}
+\toprule
+\textbf{Concept} & \textbf{How Demonstrated} \\
+\midrule
+Transactions & Python TransactionManager with explicit COMMIT/ROLLBACK \\
+ACID Properties & Atomicity via rollback; Durability via WAL \\
+Write-Ahead Logging & MongoDB log written before every PostgreSQL update \\
+Undo Recovery & old\_balance restored for UNCOMMITTED logs \\
+Redo Recovery & new\_balance re-applied for lost COMMITTED changes \\
+Crash Recovery & CrashSimulator raises exception before COMMIT \\
+Polyglot Persistence & PostgreSQL for data + MongoDB for logs \\
+\bottomrule
+\end{tabularx}
+\end{table}
+
+% ────────────────────────────────────────────────────────────
+\chapter{Literature Review}
+
+\section{Database Transaction Management}
+
+A \textbf{transaction} is a logical unit of work that must be executed
+completely or not at all. The ACID properties --- Atomicity, Consistency,
+Isolation, and Durability --- define the guarantees that a reliable
+transaction system must provide \cite{ramakrishnan2002}.
+
+\begin{itemize}
+  \item \textbf{Atomicity}: A transaction either completes fully or has
+        no effect. PostgreSQL achieves this through \texttt{COMMIT} and
+        \texttt{ROLLBACK}.
+  \item \textbf{Consistency}: The database moves from one valid state to
+        another. CHECK constraints and foreign keys enforce this.
+  \item \textbf{Isolation}: Concurrent transactions do not interfere.
+        PostgreSQL uses MVCC (Multi-Version Concurrency Control).
+  \item \textbf{Durability}: Committed changes survive crashes. WAL logging
+        ensures durability by writing changes to a log before applying them.
+\end{itemize}
+
+\section{Write-Ahead Logging}
+
+Write-Ahead Logging (WAL) is the fundamental technique for ensuring database
+durability \cite{mohan1992}. The WAL rule states:
+
+\begin{conceptbox}
+\textbf{WAL Rule}: A log record describing a data change must be written to
+stable storage \textit{before} the data change itself is written.
+\end{conceptbox}
+
+In our system, ``stable storage'' is MongoDB and ``data change'' is the
+PostgreSQL balance update. Every transaction follows this sequence:
+\begin{enumerate}
+  \item Write log to MongoDB (UNCOMMITTED)
+  \item Update PostgreSQL
+  \item COMMIT PostgreSQL
+  \item Update MongoDB log to COMMITTED
+\end{enumerate}
+
+\section{ARIES Recovery Algorithm}
+
+The ARIES (Algorithm for Recovery and Isolation Exploiting Semantics) algorithm
+\cite{mohan1992} is the industry standard for crash recovery in relational
+databases. It operates in three phases:
+
+\begin{enumerate}
+  \item \textbf{Analysis Phase}: Scan the log to identify committed and
+        uncommitted transactions at crash time.
+  \item \textbf{Redo Phase}: Re-apply all logged changes to ensure the
+        database reflects all committed operations.
+  \item \textbf{Undo Phase}: Reverse all changes made by uncommitted
+        transactions.
+\end{enumerate}
+
+Our project implements a simplified version of this three-phase approach
+without LSN chains, dirty page tables, or checkpoint records.
+
+\section{Polyglot Persistence}
+
+Polyglot persistence refers to using multiple database technologies within
+a single application, each chosen for its strengths \cite{fowler2012}.
+NoSQL databases like MongoDB are well-suited for flexible, high-speed log
+storage because:
+
+\begin{itemize}
+  \item Schema-free documents can store variable metadata per log entry
+  \item Insert operations are fast and do not require transaction overhead
+  \item Rich query capabilities allow efficient log filtering by status
+  \item MongoDB is independent of the PostgreSQL transaction — a failed
+        PG transaction does not affect the MongoDB log
+\end{itemize}
+
+% ────────────────────────────────────────────────────────────
+\chapter{Existing System vs Proposed System}
+
+\section{Existing Approaches}
+
+Traditional database recovery approaches have significant limitations for
+educational purposes:
+
+\begin{table}[H]
+\centering
+\caption{Existing vs Proposed System Comparison}
+\begin{tabularx}{\textwidth}{lXX}
+\toprule
+\textbf{Aspect} & \textbf{Existing/Traditional} & \textbf{Proposed System} \\
+\midrule
+Log Storage & Binary log files on disk & MongoDB JSON documents \\
+Log Format & Internal binary format & Human-readable JSON \\
+Recovery & Automated, invisible to user & Explicit, demonstrable steps \\
+Complexity & Full ARIES with LSNs & Simplified 3-phase approach \\
+Observability & Cannot inspect logs easily & Query logs with mongosh \\
+Database Type & Single RDBMS & Hybrid PostgreSQL + MongoDB \\
+Educational Use & Not designed for teaching & Specifically for ADBMS demos \\
+Crash Testing & Requires actual system crash & Python Exception injection \\
+\bottomrule
+\end{tabularx}
+\end{table}
+
+\section{Advantages of the Proposed System}
+
+\begin{enumerate}
+  \item \textbf{Transparency}: Every log entry is a readable JSON document
+        that students can inspect and understand.
+  \item \textbf{Demonstrability}: The crash and recovery sequence is
+        observable step-by-step in the terminal.
+  \item \textbf{Concept Clarity}: The separation of WAL (MongoDB) and data
+        (PostgreSQL) makes the WAL principle visually clear.
+  \item \textbf{Practical Implementation}: Runs on a single laptop with
+        freely available software.
+\end{enumerate}
